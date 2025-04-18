@@ -150,7 +150,8 @@ ggplot(drive_comparison) +
 ```{r, message = FALSE, warning = FALSE}
 mc_comparison |> 
   filter(diff_da < -0.05) |>
-  select(base_total,
+  select(zone,
+         base_total,
          alt_total,
          diff_da,
          diff_s2,
@@ -160,8 +161,43 @@ mc_comparison |>
          diff_ta,
          diff_bk,
          diff_wk) |>
-  t() |>
+  column_to_rownames("zone") |>  # Use zone ID as column names
+  t() |> 
   kable(digits = 2)
 ```
 
+# Finding the census block/tract IDs for the five zones
+
+```{r, message = FALSE, warning = FALSE}
+file_path = "/Users/paigelee/Documents/SES 5394/T4/CTPS_TDM23_TAZ_2017g_v202303.shp"
+
+taz_shapes <- st_read(file_path, quiet = TRUE) |>
+  st_transform("WGS84") |>
+  rename(zone = taz_id)
+
+library(tigris)
+options(tigris_use_cache = TRUE)
+
+# Example for Massachusetts tracts (you can use blocks() for finer detail)
+census_tracts <- tracts(state = "MA", year = 2020, cb = TRUE) |>
+  st_transform(st_crs(taz_shapes))  # Match projection
+
+taz_with_tract <- st_join(taz_shapes, census_tracts, left = TRUE)
+
+taz_with_tract |> 
+  select(zone, GEOID, NAME)
+
+# Your list of zone IDs
+selected_zones <- c(238, 643, 644, 691, 696)
+
+# Filter taz_with_tract to only include those zones
+filtered_taz <- taz_with_tract |> 
+  filter(zone %in% selected_zones)
+
+# View the results
+filtered_taz |> 
+  select(zone, GEOID) |> 
+  st_drop_geometry() |> 
+  print()
+```
 
