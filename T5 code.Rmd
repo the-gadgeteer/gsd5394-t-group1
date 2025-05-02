@@ -1,0 +1,657 @@
+---
+title: "T5 code"
+output: html_document
+---
+
+# Load libraries
+
+```{r, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(sf)
+library(here)
+library(maptiles)
+library(tidyterra)
+library(knitr)
+library(tigris)
+```
+
+# Load the highway network
+
+```{r, message = FALSE, warning = FALSE}
+file_path = "/Users/paigelee/Documents/SES 5394/T5/hwy.geojson"
+
+all_roads <- st_read(file_path, quiet = TRUE)
+```
+
+```{r, message = FALSE, warning = FALSE}
+ggplot(all_roads) +
+  geom_sf() +
+  theme_void()
+```
+
+# Load link volumes
+
+Link volumes from the trip assignment step are in the following four .csv files:
+
+* flows_am.csv (AM peak period)
+* flows_pm.csv (PM peak period)
+* flows_md.csv (mid-day off-peak period)
+* flows_nt.csv (nighttime off-peak period)
+
+```{r, message = FALSE, warning = FALSE}
+# AM peak period
+
+# Base
+file_path = "/Users/paigelee/Documents/SES 5394/T5/flows_am_base.csv"
+am_hwy_flows_base <- read_csv(file_path, show_col_types = FALSE) |>
+  rename(ID = ID1,
+         base_flow = Tot_Flow_PCE) |>
+  select(ID, base_flow)
+
+# Alt
+file_path = "/Users/paigelee/Documents/SES 5394/T5/flows_am_alt.csv"
+
+am_hwy_flows_alt <- read_csv(file_path, show_col_types = FALSE) |>
+  rename(ID = ID1,
+         alt_flow = Tot_Flow_PCE) |>
+  select(ID, alt_flow)
+```
+
+```{r, message = FALSE, warning = FALSE}
+# PM peak period
+
+# Base
+file_path = "/Users/paigelee/Documents/SES 5394/T5/flows_pm_base.csv"
+pm_hwy_flows_base <- read_csv(file_path, show_col_types = FALSE) |>
+  rename(ID = ID1,
+         base_flow = Tot_Flow_PCE) |>
+  select(ID, base_flow)
+
+# Alt
+file_path = "/Users/paigelee/Documents/SES 5394/T5/flows_pm_alt.csv"
+
+pm_hwy_flows_alt <- read_csv(file_path, show_col_types = FALSE) |>
+  rename(ID = ID1,
+         alt_flow = Tot_Flow_PCE) |>
+  select(ID, alt_flow)
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Mid-day off-peak period
+
+# Base
+file_path = "/Users/paigelee/Documents/SES 5394/T5/flows_md_base.csv"
+md_hwy_flows_base <- read_csv(file_path, show_col_types = FALSE) |>
+  rename(ID = ID1,
+         base_flow = Tot_Flow_PCE) |>
+  select(ID, base_flow)
+
+# Alt
+file_path = "/Users/paigelee/Documents/SES 5394/T5/flows_md_alt.csv"
+
+md_hwy_flows_alt <- read_csv(file_path, show_col_types = FALSE) |>
+  rename(ID = ID1,
+         alt_flow = Tot_Flow_PCE) |>
+  select(ID, alt_flow)
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Nighttime off-peak period
+
+# Base
+file_path = "/Users/paigelee/Documents/SES 5394/T5/flows_nt_base.csv"
+nt_hwy_flows_base <- read_csv(file_path, show_col_types = FALSE) |>
+  rename(ID = ID1,
+         base_flow = Tot_Flow_PCE) |>
+  select(ID, base_flow)
+
+# Alt
+file_path = "/Users/paigelee/Documents/SES 5394/T5/flows_nt_alt.csv"
+
+nt_hwy_flows_alt <- read_csv(file_path, show_col_types = FALSE) |>
+  rename(ID = ID1,
+         alt_flow = Tot_Flow_PCE) |>
+  select(ID, alt_flow)
+```
+
+# Join base and alt link volumes for each time of day
+
+```{r, message = FALSE, warning = FALSE}
+# AM peak period
+
+link_vols_compare_am <- inner_join(all_roads, am_hwy_flows_base) |>
+  left_join(am_hwy_flows_alt) |>
+  replace_na(list(alt_flow = 0)) |>
+  mutate(flow_diff = alt_flow - base_flow) 
+```
+
+```{r, message = FALSE, warning = FALSE}
+# PM peak period
+
+link_vols_compare_pm <- inner_join(all_roads, pm_hwy_flows_base) |>
+  left_join(pm_hwy_flows_alt) |>
+  replace_na(list(alt_flow = 0)) |>
+  mutate(flow_diff = alt_flow - base_flow) 
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Mid-day off-peak period
+
+link_vols_compare_md <- inner_join(all_roads, md_hwy_flows_base) |>
+  left_join(md_hwy_flows_alt) |>
+  replace_na(list(alt_flow = 0)) |>
+  mutate(flow_diff = alt_flow - base_flow) 
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Nighttime off-peak period
+
+link_vols_compare_nt <- inner_join(all_roads, nt_hwy_flows_base) |>
+  left_join(nt_hwy_flows_alt) |>
+  replace_na(list(alt_flow = 0)) |>
+  mutate(flow_diff = alt_flow - base_flow) 
+```
+
+# Filtering to only include the area near where we made changes
+
+Professor Voulgaris filtered to only include roads within 5 kilometers of a bridge she removed and provided the coordinates of that bridge
+
+In our case, we want to filter the data to only include roads within 5 kilometers of Harvard and within 15 kilometers of MIT.
+
+```{r, message = FALSE, warning = FALSE}
+# Create buffers around Harvard and MIT
+harvard_coords <- tibble(lat = 42.373611, lon = -71.109733) |>  # Harvard 
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) |>  # WGS84
+  st_transform(26986) |>  # Massachusetts state plane (meters)
+  st_buffer(dist = 5000) # 5,000 meters
+
+mit_coords <- tibble(lat = 42.360091, lon = -71.09416) |>  # MIT
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) |>
+  st_transform(26986) |>
+  st_buffer(dist = 5000) # 5,000 meters
+
+# Combine the two buffers
+combined_vicinity <- st_union(harvard_coords, mit_coords)
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Filter link volumes to those within 5km of Harvard or MIT
+
+# AM
+vicinity_links_am <- link_vols_compare_am |>
+  st_transform(26986) |>
+  st_filter(combined_vicinity)
+
+vicinity_increases_am <- vicinity_links_am |>
+  filter(flow_diff > 50)
+
+vicinity_decreases_am <- vicinity_links_am |>
+  filter(flow_diff < -50) |>
+  mutate(flow_diff = -1 * flow_diff)
+
+# PM
+vicinity_links_pm <- link_vols_compare_pm |>
+  st_transform(26986) |>
+  st_filter(combined_vicinity)
+
+vicinity_increases_pm <- vicinity_links_pm |>
+  filter(flow_diff > 50)
+
+vicinity_decreases_pm <- vicinity_links_pm |>
+  filter(flow_diff < -50) |>
+  mutate(flow_diff = -1 * flow_diff)
+
+# MD
+vicinity_links_md <- link_vols_compare_md |>
+  st_transform(26986) |>
+  st_filter(combined_vicinity)
+
+vicinity_increases_md <- vicinity_links_md |>
+  filter(flow_diff > 50)
+
+vicinity_decreases_md <- vicinity_links_md |>
+  filter(flow_diff < -50) |>
+  mutate(flow_diff = -1 * flow_diff)
+
+# NT
+vicinity_links_nt <- link_vols_compare_nt |>
+  st_transform(26986) |>
+  st_filter(combined_vicinity)
+
+vicinity_increases_nt <- vicinity_links_nt |>
+  filter(flow_diff > 50)
+
+vicinity_decreases_nt <- vicinity_links_nt |>
+  filter(flow_diff < -50) |>
+  mutate(flow_diff = -1 * flow_diff)
+```
+
+# Visualizing comparison of link volumes for each time of day
+
+```{r, message = FALSE, warning = FALSE}
+# AM increases
+base_map <- get_tiles(vicinity_links_am,
+                      provider = "CartoDB.Positron",
+                      zoom = 12,
+                      crop = TRUE)
+
+ggplot(vicinity_increases_am) +
+  geom_spatraster_rgb(data =base_map) +
+  geom_sf(aes(color = flow_diff),
+          linewidth = 1) +
+  scale_color_viridis_c(transform = "log2",
+                        breaks = c(80, 160, 320, 640, 1280),
+                        direction = -1,
+                        name = "Increase in morning\npeak traffic volumes") +
+  theme_void()
+```
+
+```{r, message = FALSE, warning = FALSE}
+# AM decreases
+base_map <- get_tiles(vicinity_links_am,
+                      provider = "CartoDB.Positron",
+                      zoom = 12,
+                      crop = TRUE)
+
+ggplot(vicinity_decreases_am) +
+  geom_spatraster_rgb(data =base_map) +
+  geom_sf(aes(color = flow_diff),
+          linewidth = 1) +
+  scale_color_viridis_c(transform = "log2",
+                        breaks = c(80, 160, 320, 640, 1280, 2560, 5120),
+                        direction = -1,
+                        name = "Decrease in morning\npeak traffic volumes") +
+  theme_void()
+```
+
+```{r, message = FALSE, warning = FALSE}
+# PM increases
+base_map <- get_tiles(vicinity_links_pm,
+                      provider = "CartoDB.Positron",
+                      zoom = 12,
+                      crop = TRUE)
+
+ggplot(vicinity_increases_pm) +
+  geom_spatraster_rgb(data =base_map) +
+  geom_sf(aes(color = flow_diff),
+          linewidth = 1) +
+  scale_color_viridis_c(transform = "log2",
+                        breaks = c(80, 160, 320, 640, 1280),
+                        direction = -1,
+                        name = "Increase in afternoon\npeak traffic volumes") +
+  theme_void()
+```
+
+```{r, message = FALSE, warning = FALSE}
+# PM decreases
+base_map <- get_tiles(vicinity_links_pm,
+                      provider = "CartoDB.Positron",
+                      zoom = 12,
+                      crop = TRUE)
+
+ggplot(vicinity_decreases_pm) +
+  geom_spatraster_rgb(data =base_map) +
+  geom_sf(aes(color = flow_diff),
+          linewidth = 1) +
+  scale_color_viridis_c(transform = "log2",
+                        breaks = c(80, 160, 320, 640, 1280, 2560, 5120),
+                        direction = -1,
+                        name = "Decrease in afternoon\npeak traffic volumes") +
+  theme_void()
+```
+
+```{r, message = FALSE, warning = FALSE}
+# MD increases
+base_map <- get_tiles(vicinity_links_md,
+                      provider = "CartoDB.Positron",
+                      zoom = 12,
+                      crop = TRUE)
+
+ggplot(vicinity_increases_md) +
+  geom_spatraster_rgb(data =base_map) +
+  geom_sf(aes(color = flow_diff),
+          linewidth = 1) +
+  scale_color_viridis_c(transform = "log2",
+                        breaks = c(80, 160, 320, 640, 1280),
+                        direction = -1,
+                        name = "Increase in mid-day\n off-peak traffic volumes") +
+  theme_void()
+```
+
+```{r, message = FALSE, warning = FALSE}
+# MD decreases
+base_map <- get_tiles(vicinity_links_md,
+                      provider = "CartoDB.Positron",
+                      zoom = 12,
+                      crop = TRUE)
+
+ggplot(vicinity_decreases_md) +
+  geom_spatraster_rgb(data =base_map) +
+  geom_sf(aes(color = flow_diff),
+          linewidth = 1) +
+  scale_color_viridis_c(transform = "log2",
+                        breaks = c(80, 160, 320, 640, 1280, 2560, 5120),
+                        direction = -1,
+                        name = "Decrease in mid-day\n off-peak traffic volumes") +
+  theme_void()
+```
+
+```{r, message = FALSE, warning = FALSE}
+# NT increases
+base_map <- get_tiles(vicinity_links_nt,
+                      provider = "CartoDB.Positron",
+                      zoom = 12,
+                      crop = TRUE)
+
+ggplot(vicinity_increases_nt) +
+  geom_spatraster_rgb(data =base_map) +
+  geom_sf(aes(color = flow_diff),
+          linewidth = 1) +
+  scale_color_viridis_c(transform = "log2",
+                        breaks = c(80, 160, 320, 640, 1280),
+                        direction = -1,
+                        name = "Increase in nighttime\n off-peak traffic volumes") +
+  theme_void()
+```
+
+```{r, message = FALSE, warning = FALSE}
+# NT decreases
+base_map <- get_tiles(vicinity_links_nt,
+                      provider = "CartoDB.Positron",
+                      zoom = 12,
+                      crop = TRUE)
+
+ggplot(vicinity_decreases_nt) +
+  geom_spatraster_rgb(data =base_map) +
+  geom_sf(aes(color = flow_diff),
+          linewidth = 1) +
+  scale_color_viridis_c(transform = "log2",
+                        breaks = c(80, 160, 320, 640, 1280, 2560, 5120),
+                        direction = -1,
+                        name = "Decrease in nighttime\n off-peak traffic volumes") +
+  theme_void()
+```
+
+# Load transit stop locations
+
+```{r, message = FALSE, warning = FALSE}
+file_path = "/Users/paigelee/Documents/SES 5394/T5/stops.geojson"
+
+stop_locs <- st_read(file_path, quiet = TRUE)
+```
+
+```{r, message = FALSE, warning = FALSE}
+base_map <- get_tiles(stop_locs,
+                      provider = "CartoDB.Positron",
+                      zoom = 8,
+                      crop = TRUE)
+
+ggplot(stop_locs) +
+  geom_spatraster_rgb(data = base_map) +
+  geom_sf(size = 1, color = "orange") +
+  theme_void()
+```
+
+# Load boarding/alighting data
+
+We are focusing on all four time periods and only people who walk to/from their transit stops (ignore those who use park and ride lots)
+
+```{r, message = FALSE, warning = FALSE}
+# AM
+
+file_path <- "/Users/paigelee/Documents/SES 5394/T5/onoff_tw_am_base.csv"
+base_onoff_am <- read_csv(file_path, show_col_types = FALSE) |>
+  select(STOP, On, Off) |>
+  rename(base_on = On,
+         base_off = Off,
+         ID = STOP)
+
+file_path <- "/Users/paigelee/Documents/SES 5394/T5/onoff_tw_am_alt.csv"
+alt_onoff_am <- read_csv(file_path, show_col_types = FALSE) |>
+  select(STOP, On, Off) |>
+  rename(alt_on = On,
+         alt_off = Off,
+         ID = STOP)
+```
+
+```{r, message = FALSE, warning = FALSE}
+# PM
+
+file_path <- "/Users/paigelee/Documents/SES 5394/T5/onoff_tw_pm_base.csv"
+base_onoff_pm <- read_csv(file_path, show_col_types = FALSE) |>
+  select(STOP, On, Off) |>
+  rename(base_on = On,
+         base_off = Off,
+         ID = STOP)
+
+file_path <- "/Users/paigelee/Documents/SES 5394/T5/onoff_tw_pm_alt.csv"
+alt_onoff_pm <- read_csv(file_path, show_col_types = FALSE) |>
+  select(STOP, On, Off) |>
+  rename(alt_on = On,
+         alt_off = Off,
+         ID = STOP)
+```
+
+```{r, message = FALSE, warning = FALSE}
+# MD
+
+file_path <- "/Users/paigelee/Documents/SES 5394/T5/onoff_tw_md_base.csv"
+base_onoff_md <- read_csv(file_path, show_col_types = FALSE) |>
+  select(STOP, On, Off) |>
+  rename(base_on = On,
+         base_off = Off,
+         ID = STOP)
+
+file_path <- "/Users/paigelee/Documents/SES 5394/T5/onoff_tw_md_alt.csv"
+alt_onoff_md <- read_csv(file_path, show_col_types = FALSE) |>
+  select(STOP, On, Off) |>
+  rename(alt_on = On,
+         alt_off = Off,
+         ID = STOP)
+```
+
+```{r, message = FALSE, warning = FALSE}
+# NT
+
+file_path <- "/Users/paigelee/Documents/SES 5394/T5/onoff_tw_nt_base.csv"
+base_onoff_nt <- read_csv(file_path, show_col_types = FALSE) |>
+  select(STOP, On, Off) |>
+  rename(base_on = On,
+         base_off = Off,
+         ID = STOP)
+
+file_path <- "/Users/paigelee/Documents/SES 5394/T5/onoff_tw_nt_alt.csv"
+alt_onoff_nt <- read_csv(file_path, show_col_types = FALSE) |>
+  select(STOP, On, Off) |>
+  rename(alt_on = On,
+         alt_off = Off,
+         ID = STOP)
+```
+
+# Compare ridership
+
+### What are the 20 transit stops with the biggest changes in ridership?
+
+```{r, message = FALSE, warning = FALSE}
+# AM
+
+stop_diff_am <- stop_locs |>
+  inner_join(base_onoff_am) |>
+  left_join(alt_onoff_am) |>
+  mutate(base_total = base_on + base_off,
+         alt_total = alt_on + alt_off,
+         diff = alt_total - base_total) |>
+  mutate(abs_diff = abs(diff)) |>
+  arrange(-abs_diff) |>
+  mutate(inc_dec = ifelse(diff < 0, "Decrease", "Increase"))
+
+stop_diff_am |>
+  st_drop_geometry() |>
+  select(ID, diff) |>
+  head(n = 20) |>
+  kable()
+```
+
+```{r, message = FALSE, warning = FALSE}
+# PM
+
+stop_diff_pm <- stop_locs |>
+  inner_join(base_onoff_pm) |>
+  left_join(alt_onoff_pm) |>
+  mutate(base_total = base_on + base_off,
+         alt_total = alt_on + alt_off,
+         diff = alt_total - base_total) |>
+  mutate(abs_diff = abs(diff)) |>
+  arrange(-abs_diff) |>
+  mutate(inc_dec = ifelse(diff < 0, "Decrease", "Increase"))
+
+stop_diff_pm |>
+  st_drop_geometry() |>
+  select(ID, diff) |>
+  head(n = 20) |>
+  kable()
+```
+
+```{r, message = FALSE, warning = FALSE}
+# MD
+
+stop_diff_md <- stop_locs |>
+  inner_join(base_onoff_md) |>
+  left_join(alt_onoff_md) |>
+  mutate(base_total = base_on + base_off,
+         alt_total = alt_on + alt_off,
+         diff = alt_total - base_total) |>
+  mutate(abs_diff = abs(diff)) |>
+  arrange(-abs_diff) |>
+  mutate(inc_dec = ifelse(diff < 0, "Decrease", "Increase"))
+
+stop_diff_md |>
+  st_drop_geometry() |>
+  select(ID, diff) |>
+  head(n = 20) |>
+  kable()
+```
+
+```{r, message = FALSE, warning = FALSE}
+# NT
+
+stop_diff_nt <- stop_locs |>
+  inner_join(base_onoff_nt) |>
+  left_join(alt_onoff_nt) |>
+  mutate(base_total = base_on + base_off,
+         alt_total = alt_on + alt_off,
+         diff = alt_total - base_total) |>
+  mutate(abs_diff = abs(diff)) |>
+  arrange(-abs_diff) |>
+  mutate(inc_dec = ifelse(diff < 0, "Decrease", "Increase"))
+
+stop_diff_nt |>
+  st_drop_geometry() |>
+  select(ID, diff) |>
+  head(n = 20) |>
+  kable()
+```
+
+### Visualizing the stops with changes of more than n boardings and alightings 
+
+n is determined by the table values (`stop_diff_am`, etc.) in the previous step 
+
+```{r, message = FALSE, warning = FALSE}
+# AM
+
+big_stop_diffs_am <- stop_diff_am |>
+  filter(abs_diff > 40)
+
+base_map_am <- get_tiles(big_stop_diffs_am,
+                      provider = "CartoDB.Positron",
+                      zoom = 14,
+                      crop = TRUE)
+
+ggplot(big_stop_diffs_am) +
+  geom_spatraster_rgb(data = base_map_am) +
+  geom_sf(aes(size = abs_diff,
+              color = inc_dec),
+          alpha = 0.3) +
+  scale_size(name = "Magnitude of change") +
+  scale_color_manual(name = "Direction of change",
+                     values = c("red", "blue"),
+                     labels = c("Decrease",
+                                "Increase")) +
+  labs(title = "Stops with Significant AM Peak Volume Changes") +
+  theme_void()
+```
+
+```{r, message = FALSE, warning = FALSE}
+# PM
+
+big_stop_diffs_pm <- stop_diff_pm |>
+  filter(abs_diff > 40)
+
+base_map_pm <- get_tiles(big_stop_diffs_pm,
+                      provider = "CartoDB.Positron",
+                      zoom = 18,
+                      crop = TRUE)
+
+ggplot(big_stop_diffs_pm) +
+  geom_spatraster_rgb(data = base_map_pm) +
+  geom_sf(aes(size = abs_diff,
+              color = inc_dec),
+          alpha = 0.3) +
+  scale_size(name = "Magnitude of change") +
+  scale_color_manual(name = "Direction of change",
+                     values = c("red", "blue"),
+                     labels = c("Decrease",
+                                "Increase")) +
+  labs(title = "Stops with Significant PM Peak Volume Changes") +
+  theme_void()
+```
+
+```{r, message = FALSE, warning = FALSE}
+# MD
+
+big_stop_diffs_md <- stop_diff_md |>
+  filter(abs_diff > 40)
+
+base_map_md <- get_tiles(big_stop_diffs_md,
+                      provider = "CartoDB.Positron",
+                      zoom = 15,
+                      crop = TRUE)
+
+ggplot(big_stop_diffs_md) +
+  geom_spatraster_rgb(data = base_map_md) +
+  geom_sf(aes(size = abs_diff,
+              color = inc_dec),
+          alpha = 0.3) +
+  scale_size(name = "Magnitude of change") +
+  scale_color_manual(name = "Direction of change",
+                     values = c("red", "blue"),
+                     labels = c("Decrease",
+                                "Increase")) +
+  labs(title = "Stops with Significant Mid-Day Off-Peak Volume Changes") +
+  theme_void()
+```
+
+```{r, message = FALSE, warning = FALSE}
+# NT
+
+big_stop_diffs_nt <- stop_diff_nt |>
+  filter(abs_diff > 40)
+
+base_map_nt <- get_tiles(big_stop_diffs_nt,
+                      provider = "CartoDB.Positron",
+                      zoom = 15,
+                      crop = TRUE)
+
+ggplot(big_stop_diffs_nt) +
+  geom_spatraster_rgb(data = base_map_nt) +
+  geom_sf(aes(size = abs_diff,
+              color = inc_dec),
+          alpha = 0.3) +
+  scale_size(name = "Magnitude of change") +
+  scale_color_manual(name = "Direction of change",
+                     values = c("red", "blue"),
+                     labels = c("Decrease",
+                                "Increase")) +
+  labs(title = "Stops with Significant Nighttime Off-Peak Volume Changes") +
+  theme_void()
+```
